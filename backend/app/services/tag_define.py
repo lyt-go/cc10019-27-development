@@ -52,6 +52,9 @@ def validate_tag_logic(tag_id: str) -> dict[str, Any]:
     source_attrs = tag.get("source_attrs", [])
     missing = []
     for attr_id in source_attrs:
+        # 标签间引用（TAG-xxx）不属于属性字典校验范围
+        if str(attr_id).startswith("TAG-"):
+            continue
         attr = store.find_by_field("attr_dict", "attr_id", attr_id)
         if attr is None:
             missing.append(attr_id)
@@ -62,3 +65,27 @@ def validate_tag_logic(tag_id: str) -> dict[str, Any]:
         "missing_attrs": missing,
         "source_attrs": source_attrs,
     }
+
+
+def validate_tag_at_point_in_time(tag_id: str, point_in_time: str) -> dict[str, Any]:
+    """时点校验：按指定时点解析属性字段版本，检查条件与字段类型是否兼容。
+
+    同一时点每个属性只有一个生效版本，因此不会读到相互矛盾的字段类型。
+    """
+    from app.services.attr_version import validate_tag_at_point_in_time as _validate
+
+    return _validate(tag_id, point_in_time)
+
+
+def confirm_conditions(tag_id: str, point_in_time: str | None = None, remark: str = "") -> dict[str, Any]:
+    """确认标签条件，锁定确认时点与原字段来源版本。"""
+    from app.services.attr_version import confirm_tag_conditions
+
+    return confirm_tag_conditions(tag_id, point_in_time=point_in_time, remark=remark)
+
+
+def reopen_validation(withdraw_id: str) -> dict[str, Any]:
+    """基于撤回记录重新打开标签校验，输出冲突字段类型说明。"""
+    from app.services.attr_version import reopen_tag_validation
+
+    return reopen_tag_validation(withdraw_id)

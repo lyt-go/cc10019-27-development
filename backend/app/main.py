@@ -22,6 +22,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def underscore_path_alias(request, call_next):
+    """兼容前端下划线模块路径（/api/attr_dict/... → /api/attr-dict/...）。
+
+    后端路由统一使用连字符，前端页面历史上使用下划线，这里只改写 /api 后
+    第一段模块名中的下划线，其余路径段与查询串保持不变。
+    """
+    path = request.scope.get("path", "")
+    if path.startswith("/api/"):
+        head, separator, tail = path[len("/api/"):].partition("/")
+        if "_" in head:
+            aliased = f"/api/{head.replace('_', '-')}"
+            if separator:
+                aliased = f"{aliased}/{tail}"
+            request.scope["path"] = aliased
+            raw_path = request.scope.get("raw_path")
+            if raw_path is not None:
+                request.scope["raw_path"] = aliased.encode()
+    return await call_next(request)
+
 for module in ROUTERS:
     app.include_router(module.router)
 

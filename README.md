@@ -74,6 +74,33 @@ npm run dev
   `backend/app/routers/<模块>.py`，业务规则在 `backend/app/services/<模块>.py`。
 - 列表接口统一返回 `{ items, total, page, size }`，动作接口统一返回 `{ ok, message }`。
 - 状态流转只允许在 `app/services` 里改，路由层不做业务判断。
+- 后端路由统一使用连字符前缀（如 `/api/attr-dict`），前端历史上的下划线路径
+  （如 `/api/attr_dict`）由 `app/main.py` 的兼容中间件改写，无需在前端逐个改名。
+
+## 属性字典版本回滚与标签复核
+
+属性字段定义按生效时间保留为半开区间版本（`[effective_from, effective_to)`），
+同一时点每个属性只命中一个生效版本，保证时点校验读不到相互矛盾的字段类型。
+相关规则在 `app/services/attr_version.py`，涉及三张表：
+
+- `attr_version`：属性字段定义的历史版本（含 `initial/update/rollback` 变更类型）。
+- `attr_withdraw`：撤回记录，把**真正撤回的区间**（`withdrawn_intervals`）与
+  **需复核的候选标签**（`review_candidates`）分开留痕；旧类型仍支持的条件放在
+  `unaffected_tags`，冲突条件带字段类型冲突说明。
+- `tag_condition_binding`：已确认标签条件，锁定确认时点与原字段来源版本；
+  撤回只附加冲突证据，不改写时点和来源。
+
+主要接口（均同时支持连字符与下划线前缀）：
+
+- `GET /api/attr-dict/versions/{attr_id}`：版本时间线
+- `POST /api/attr-dict/versions/{attr_id}/publish`：按生效时间写入字段版本
+- `GET /api/attr-dict/versions/{attr_id}/as-of?point_in_time=...`：时点版本查询
+- `GET /api/attr-dict/versions/{attr_id}/periods?period_grain=day&start=...&end=...`：按周期回查可用版本
+- `POST /api/attr-dict/withdraws/{attr_id}`：撤回当前定义并回滚到目标版本
+- `GET /api/attr-dict/withdraws[?attr_id=...]`：撤回记录回查
+- `POST /api/attr-dict/withdraws/{withdraw_id}/reopen-validation`：重新打开标签校验
+- `POST /api/attr-dict/bindings/{tag_id}/confirm`：确认标签条件（锁定时点与来源）
+- `GET /api/tag-define/{tag_id}/validate-at?point_in_time=...`：标签条件时点校验
 
 领域：数据工程
 子方向：数据分析与数据应用

@@ -1,19 +1,70 @@
-"""标签定义路由：管理标签规则的定义与依赖校验。"""
+"""标签定义路由：管理标签规则的定义、依赖校验与时点复核。"""
 from __future__ import annotations
 
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
 
 from app.schemas import ActionPayload, ActionResult
+from app.services import attr_version
 from app.services.tag_define import (
-    list_tags, get_tag, create_tag, update_tag, delete_tag, get_tags_by_level, validate_tag_logic,
+    list_tags, get_tag, create_tag, update_tag, delete_tag, get_tags_by_level,
+    validate_tag_logic, validate_tag_at_point_in_time, confirm_conditions,
+    reopen_validation,
 )
 from app.store import store, query_filters
 
 router = APIRouter(prefix="/api/tag-define", tags=["tag_define"])
 
 
+class ConfirmPayload(BaseModel):
+    """确认标签条件时点。"""
+
+    point_in_time: str | None = None
+    remark: str = ""
+
+
+class ReopenPayload(BaseModel):
+    """按撤回记录重新打开校验。"""
+
+    withdraw_id: str
+
+
+# ========== 时点校验与条件复核（具体路径优先注册） ==========
+@router.get("/bindings")
+def tag_bindings(tag_id: str | None = None) -> dict[str, Any]:
+    rows = attr_version.list_bindings(tag_id)
+    return {"items": rows, "total": len(rows)}
+
+
+@router.post("/reopen-validation")
+def reopen(payload: ReopenPayload) -> ActionResult:
+    """按撤回记录重新打开候选标签校验。"""
+    report = reopen_validation(payload.withdraw_id)
+    return ActionResult(ok=True, message="Validation reopened", entry=report)
+
+
+@router.get("/{tag_id}/validate-at")
+def validate_at(tag_id: str, point_in_time: str) -> dict[str, Any]:
+    """时点校验：按指定时点解析属性版本并检查字段类型冲突。"""
+    try:
+        return validate_tag_at_point_in_time(tag_id, point_in_time)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/{tag_id}/confirm-conditions")
+def confirm_tag(tag_id: str, payload: ConfirmPayload) -> ActionResult:
+    """确认标签条件，锁定确认时点与原字段来源。"""
+    try:
+        row = confirm_conditions(tag_id, point_in_time=payload.point_in_time, remark=payload.remark)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return ActionResult(ok=True, message="Conditions confirmed", entry=row)
+
+
+# ========== 常规 CRUD（保持原始路径契约） ==========
 @router.get("")
 def index(request: Request, page: int = 1, size: int = 20) -> dict[str, Any]:
     rows = store.rows("tag_define")
